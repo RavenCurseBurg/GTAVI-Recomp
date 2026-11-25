@@ -1,5 +1,12 @@
-name: Native probe ARM64 verification
-on: workflow_dispatch
+name: Native probe verification
+on:
+  workflow_dispatch:
+    inputs:
+      hosts:
+        description: Hosted hardware to exercise
+        type: choice
+        default: arm64
+        options: [arm64, macos-intel]
 permissions:
   contents: read
 jobs:
@@ -9,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04-arm, windows-11-arm, macos-26]
+        os: ${{ fromJSON(inputs.hosts == 'macos-intel' && '["macos-26-intel"]' || '["ubuntu-24.04-arm","windows-11-arm","macos-26"]') }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -28,7 +35,11 @@ jobs:
         run: |
           set -eu
           uname -a
-          case "$(uname -m)" in arm64|aarch64) ;; *) exit 1 ;; esac
+          if [ "${{ matrix.os }}" = macos-26-intel ]; then
+            test "$(uname -m)" = x86_64
+          else
+            case "$(uname -m)" in arm64|aarch64) ;; *) exit 1 ;; esac
+          fi
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGTAVI_WARNINGS_AS_ERRORS=ON
       - run: cmake --build build --config Release --parallel 4
       - name: Run native host and Unicode tests
@@ -50,7 +61,7 @@ jobs:
           ref: c1ab0d27cc09c4737ccdbca9bff73a7a5a5b0dc9
           path: before
           persist-credentials: false
-      - name: Reproduce the original translation status on Apple silicon
+      - name: Reproduce the original Darwin translation status
         if: runner.os == 'macOS'
         shell: bash
         run: |
