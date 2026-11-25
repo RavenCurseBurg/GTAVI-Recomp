@@ -1,4 +1,4 @@
-name: Pinned Linux runtime inventory
+name: Pinned offscreen color and depth fixtures
 
 on: workflow_dispatch
 
@@ -8,7 +8,7 @@ permissions:
 jobs:
   runtime:
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v7
         with:
@@ -28,7 +28,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends g++-14 ninja-build nasm pkg-config \
-            libx11-dev libxext-dev libxrandr-dev libasound2-dev libvulkan1 mesa-vulkan-drivers \
+            libx11-dev libxext-dev libxrandr-dev libasound2-dev libvulkan1 mesa-vulkan-drivers vulkan-tools \
             libpipewire-0.3-dev libpulse-dev libwayland-dev libxkbcommon-dev libegl-dev libdecor-0-dev
           g++-14 --version
           cmake --version
@@ -39,50 +39,48 @@ jobs:
           free -h
           df -h .
 
-      - name: Configure the Release build
+      - name: Select the Mesa CPU Vulkan driver
+        run: |
+          icd=$(dpkg -L mesa-vulkan-drivers | grep -E '/lvp_icd(\.x86_64)?\.json$')
+          test -f "$icd"
+          export VK_DRIVER_FILES="$icd"
+          export XDG_RUNTIME_DIR="$(mktemp -d)"
+          vulkaninfo --summary | tee "$RUNNER_TEMP/vulkan-summary.txt"
+          grep -Ei 'deviceName\s*=.*llvmpipe' "$RUNNER_TEMP/vulkan-summary.txt"
+          echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
+          echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" >> "$GITHUB_ENV"
+
+      - name: Build the color and depth rendering fixtures
         run: |
           cmake -S third_party/AnyPS5 -B build/runtime -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 -DBUILD_TESTING=ON
-          ninja -C build/runtime -n patched_libraries_tests | tail -n 1
+          cmake --build build/runtime --parallel 4 --target agc_driver_color565_target_tests \
+            agc_driver_color_write_mask_dynamic_tests agc_driver_depth_range_remap_draw_tests
 
-      - name: Build the loader test and all its runtime libraries
-        run: cmake --build build/runtime --parallel 4 --target patched_libraries_tests
-
-      - name: Compare the ELF library inventory with the pinned sources
+      - name: Draw and check sample colors and depth
+        env:
+          ANYPS5_REQUIRE_VULKAN: "1"
+          GALLIUM_OVERRIDE_CPU_CAPS: avx
         run: |
-          python3 - <<'PY'
-          import struct
-          from pathlib import Path
-          root = Path("third_party/AnyPS5/core/libs/prx")
-          expected = {d.name + ".prx" for d in root.iterdir() if d.is_dir()}
-          library_dir = Path("build/runtime/core/libs/libs")
-          files = sorted(library_dir.glob("*.prx"))
-          actual = {path.name for path in files}
-          if not expected or actual != expected:
-              raise SystemExit(f"missing={sorted(expected - actual)} extra={sorted(actual - expected)}")
-          for path in files:
-              with path.open("rb") as stream:
-                  header = stream.read(20)
-              if header[:6] != b"\x7fELF\x02\x01" or struct.unpack_from("<HH", header, 16) != (3, 62):
-                  raise SystemExit(f"{path} is not a little-endian x86_64 ELF shared object")
-          print(f"Matched all {len(actual)} pinned source names to x86_64 ELF shared objects")
-          PY
-
-      - name: Load every patched runtime library
-        run: |
-          ctest --test-dir build/runtime -R '^patched_libraries$' --verbose --timeout 180 \
-            --no-tests=error --output-junit "$RUNNER_TEMP/patched.xml"
-          python3 - "$RUNNER_TEMP/patched.xml" <<'PY'
-          from pathlib import Path
+          ctest --test-dir build/runtime --verbose --timeout 120 --no-tests=error \
+            --output-junit "$RUNNER_TEMP/rendering.xml" \
+            -R '^agc_driver_(color565_target|color_write_mask_dynamic(_in_pipeline|_unsuppressed)?|depth_range_remap_draw)$'
+          python3 - "$RUNNER_TEMP/rendering.xml" <<'PY'
           import sys
           import xml.etree.ElementTree as ET
+          expected = {
+              "agc_driver_color565_target": "44 draws plus 24 constant-blend draws passed",
+              "agc_driver_color_write_mask_dynamic": "color write mask tests passed",
+              "agc_driver_color_write_mask_dynamic_in_pipeline": "color write mask tests passed",
+              "agc_driver_color_write_mask_dynamic_unsuppressed": "color write mask tests passed",
+              "agc_driver_depth_range_remap_draw": "depth range remap draw tests passed",
+          }
           cases = ET.parse(sys.argv[1]).findall("testcase")
-          assert len(cases) == 1
-          case = cases[0]
-          assert case.attrib["name"] == "patched_libraries" and case.attrib["status"] == "run"
-          assert all(case.find(tag) is None for tag in ("failure", "error", "skipped"))
-          count = len(list(Path("build/runtime/core/libs/libs").glob("*.prx")))
-          output = case.findtext("system-out", "")
-          assert f"{count} patched libraries loaded, 0 failed" in output, output
-          print(output.strip())
+          assert len(cases) == len(expected) and {c.get("name") for c in cases} == set(expected)
+          for case in cases:
+              assert case.get("status") == "run"
+              assert all(case.find(tag) is None for tag in ("skipped", "failure", "error"))
+              needle = expected[case.get("name")]
+              lines = case.findtext("system-out", "").splitlines()
+              assert any(needle in line for line in lines), (case.get("name"), lines[-10:])
           PY
