@@ -123,7 +123,7 @@ This repository sits beside AnyPS5: it holds GTA VI's research, patches,
 configuration and tests, and AnyPS5 is pinned as a submodule in
 `third_party/AnyPS5`. The decision and its reasons are recorded in
 [ADR 0003](docs/adr/0003-build-on-anyps5-relinker.md); AnyPS5's own design is in
-its [architecture document](third_party/AnyPS5/docs/dev/ARCHITECTURE.md).
+its [architecture document](https://github.com/boykopovar/AnyPS5/blob/15826135019b8c7de27f42661a850a1dd9750932/docs/dev/ARCHITECTURE.md).
 Individual decisions are recorded as ADRs under [docs/adr/](docs/adr/).
 
 ## Platform Support
@@ -177,7 +177,7 @@ Full instructions are in [docs/build.md](docs/build.md).
 
 AnyPS5 is built separately with its own toolchain (MinGW-w64 GCC on Windows).
 Fetch it with `git submodule update --init --recursive third_party/AnyPS5` and
-follow its [build instructions](third_party/AnyPS5/docs/dev/BUILD.md).
+follow its [build instructions](https://github.com/boykopovar/AnyPS5/blob/15826135019b8c7de27f42661a850a1dd9750932/docs/dev/BUILD.md).
 
 ## Development Roadmap
 

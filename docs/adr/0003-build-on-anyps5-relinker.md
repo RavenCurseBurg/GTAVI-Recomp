@@ -5,7 +5,7 @@
 - **Deciders:** project maintainer
 - **Supersedes:** [ADR 0002](0002-ps5-to-pc-library-translation.md)
 - **Related:** `README.md`, `TODO.md`, `third_party/AnyPS5`,
-  [AnyPS5 architecture](../../third_party/AnyPS5/docs/dev/ARCHITECTURE.md)
+  [AnyPS5 architecture](https://github.com/boykopovar/AnyPS5/blob/15826135019b8c7de27f42661a850a1dd9750932/docs/dev/ARCHITECTURE.md)
 
 ## Context
 
