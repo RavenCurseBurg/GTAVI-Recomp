@@ -74,10 +74,15 @@ The `ci` preset enables `-DGTAVI_WARNINGS_AS_ERRORS=ON`, matching the workflow i
 
 ## Running the diagnostic tool
 
-`gtavi-probe` prints host information and exercises path translation:
+`gtavi-probe` prints host information and exercises path translation. After the
+manual Ninja build, run `./build/tools/gtavi_probe` from the repository root
+in Bash or PowerShell. With the Visual Studio Debug build, use
+`.\build\tools\Debug\gtavi_probe.exe`. For a preset or the Windows helper,
+replace `build` with the build directory it used (such as `build/ci` or
+`build/windows`).
 
 ```console
-$ gtavi-probe --to-posix "C:\Games\GTA VI\data" --to-windows /mnt/c/Games
+$ ./build/tools/gtavi_probe --to-posix "C:\Games\GTA VI\data" --to-windows /mnt/c/Games
 gtavi-probe 0.1.0
 platform:     windows
 os version:   10.0.26200
@@ -90,7 +95,7 @@ Use the repeatable `--mount` option to override a drive's default mount point.
 The first override for each drive applies to every translation in the command.
 
 ```console
-gtavi-probe --mount D:/games --to-posix "D:\PS5\app0" --to-windows /games/PS5/app0
+./build/tools/gtavi_probe --mount D:/games --to-posix "D:\PS5\app0" --to-windows /games/PS5/app0
 ```
 
 Include its output when reporting platform-specific bugs.
