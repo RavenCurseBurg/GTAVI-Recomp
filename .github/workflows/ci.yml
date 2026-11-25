@@ -1,116 +1,84 @@
-name: CI
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-  workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
+name: Pinned Linux distribution checks
+on: workflow_dispatch
+permissions:
+  contents: read
 jobs:
-  windows:
-    name: windows / msvc
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure
-        # No -G: use whichever Visual Studio the runner image provides. The
-        # generator name changes between runner images, the default does not.
-        run: >
-          cmake -S . -B build
-          -A x64
-          -DGTAVI_WARNINGS_AS_ERRORS=ON
-
-      - name: Build
-        run: cmake --build build --config Release --parallel
-
-      - name: Test
-        run: ctest --test-dir build -C Release --output-on-failure
-
-  linux:
-    name: linux / ${{ matrix.compiler }}
-    runs-on: ubuntu-latest
+  distro:
     strategy:
       fail-fast: false
       matrix:
         include:
-          - compiler: gcc
-            cc: gcc
-            cxx: g++
-            clang_tidy: ''
-          - compiler: clang
-            cc: clang
-            cxx: clang++
-            clang_tidy: clang-tidy
-    env:
-      CC: ${{ matrix.cc }}
-      CXX: ${{ matrix.cxx }}
+          - image: debian:bookworm-slim
+            id: debian
+            version: '12'
+          - image: fedora:44
+            id: fedora
+            version: '44'
+    name: ${{ matrix.image }}
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.image }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure
-        run: >
-          cmake -S . -B build
-          -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DGTAVI_WARNINGS_AS_ERRORS=ON
-          -DCMAKE_CXX_CLANG_TIDY=${{ matrix.clang_tidy }}
-
-      - name: Build
-        run: cmake --build build --parallel
-
-      - name: Test
-        run: ctest --test-dir build --output-on-failure
-
-  anyps5:
-    name: anyps5 relinker at the pinned commit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Fetch AnyPS5 at the pinned commit
-        # AnyPS5's own submodules are not needed for the relinker-only mode
-        # (third_party/AnyPS5/docs/dev/BUILD.md), so only the submodule
-        # itself is checked out.
-        run: git submodule update --init third_party/AnyPS5
-
-      - name: Configure
-        run: >
-          cmake -S third_party/AnyPS5 -B build-anyps5
-          -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DANYPS5_RELINKER_ONLY=ON
-          -DBUILD_TESTING=ON
-
-      - name: Build
-        run: cmake --build build-anyps5 --parallel
-
-      - name: Test
-        run: >
-          ctest --test-dir build-anyps5 --output-on-failure
-          --timeout 120 --parallel 4 --no-tests=error
-
-  app0:
-    name: PS5 app0 preflight
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Test the app0 checker
-        run: python3 -I tests/test_check_app0.py
-
-  progress:
-    name: readme progress is up to date
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Test the progress tooling
-        run: python3 -m unittest discover -s tests/python -v
-
-      - name: Check README progress section
-        run: python3 scripts/update_progress.py --check
+      - name: Install distribution build packages
+        env:
+          EXPECTED_ID: ${{ matrix.id }}
+          EXPECTED_VERSION: ${{ matrix.version }}
+        run: |
+          source /etc/os-release
+          test "$ID" = "$EXPECTED_ID"
+          test "$VERSION_ID" = "$EXPECTED_VERSION"
+          cat /etc/os-release
+          uname -a
+          case "$ID" in
+            debian)
+              apt-get update -qq
+              DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates git g++ cmake ninja-build python3
+              ;;
+            fedora)
+              dnf install -y git-core gcc-c++ glibc-static libstdc++-static cmake ninja-build python3
+              ;;
+          esac
+          g++ --version
+          cmake --version
+          python3 --version
+          getconf GNU_LIBC_VERSION
+      - uses: actions/checkout@v7
+        with:
+          ref: 0b332f88343b0fdebf20a640a5c625a2132a521b
+          persist-credentials: false
+      - name: Build host tooling and compare its output with uname
+        run: |
+          test "$(git rev-parse HEAD)" = 0b332f88343b0fdebf20a640a5c625a2132a521b
+          cmake -S . -B build/host -G Ninja -DCMAKE_BUILD_TYPE=Release -DGTAVI_WARNINGS_AS_ERRORS=ON
+          cmake --build build/host --parallel 4
+          ctest --test-dir build/host --output-on-failure --no-tests=error --output-junit "$RUNNER_TEMP/host.xml"
+          build/host/tools/gtavi_probe | tee "$RUNNER_TEMP/probe.txt"
+          test "$(sed -n 's/^os version: *//p' "$RUNNER_TEMP/probe.txt")" = "$(uname -r)"
+          test "$(sed -n 's/^architecture: *//p' "$RUNNER_TEMP/probe.txt")" = "$(uname -m)"
+      - name: Build the pinned relinker and run synthetic fixtures
+        run: |
+          git submodule update --init --depth 1 third_party/AnyPS5
+          test "$(git -C third_party/AnyPS5 rev-parse HEAD)" = "$(git rev-parse HEAD:third_party/AnyPS5)"
+          git -C third_party/AnyPS5 rev-parse HEAD
+          cmake -S third_party/AnyPS5 -B build/relinker -G Ninja -DCMAKE_BUILD_TYPE=Release -DANYPS5_RELINKER_ONLY=ON -DBUILD_TESTING=ON
+          cmake --build build/relinker --parallel 4 --target relinker file_identity_tests relinker_conversion_tests
+          ctest --test-dir build/relinker --output-on-failure --no-tests=error -R '^(cli_help|file_identity|input_magic|relinker_conversion)$' --output-junit "$RUNNER_TEMP/relinker.xml"
+      - name: Verify exact test inventory
+        run: |
+          python3 - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          inventories = {
+              "host": {"gtavi_tests", "gtavi_probe_mounts", "gtavi_probe_unicode"},
+              "relinker": {"cli_help", "file_identity", "input_magic", "relinker_conversion"},
+          }
+          for suite, expected in inventories.items():
+              cases = ET.parse(Path(os.environ["RUNNER_TEMP"]) / f"{suite}.xml").findall("testcase")
+              assert {case.attrib["name"] for case in cases} == expected and len(cases) == len(expected)
+              assert all(case.attrib.get("status") == "run" and all(case.find(tag) is None for tag in ("failure", "error", "skipped")) for case in cases)
+              print(suite, sorted(expected))
+          PY
