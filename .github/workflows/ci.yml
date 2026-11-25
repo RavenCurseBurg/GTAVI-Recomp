@@ -51,6 +51,7 @@ jobs:
           persist-credentials: false
       - name: Build host tooling and compare its output with uname
         run: |
+          git config --global --add safe.directory "$(pwd -P)"
           test "$(git rev-parse HEAD)" = 0b332f88343b0fdebf20a640a5c625a2132a521b
           cmake -S . -B build/host -G Ninja -DCMAKE_BUILD_TYPE=Release -DGTAVI_WARNINGS_AS_ERRORS=ON
           cmake --build build/host --parallel 4
@@ -60,6 +61,7 @@ jobs:
           test "$(sed -n 's/^architecture: *//p' "$RUNNER_TEMP/probe.txt")" = "$(uname -m)"
       - name: Build the pinned relinker and run synthetic fixtures
         run: |
+          git config --global --add safe.directory "$(pwd -P)/third_party/AnyPS5"
           git submodule update --init --depth 1 third_party/AnyPS5
           test "$(git -C third_party/AnyPS5 rev-parse HEAD)" = "$(git rev-parse HEAD:third_party/AnyPS5)"
           git -C third_party/AnyPS5 rev-parse HEAD
