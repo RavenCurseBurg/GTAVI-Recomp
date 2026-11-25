@@ -13,12 +13,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: 08c40aa0c9ce007fcd94393b548f4c9e958c07e7
+          ref: 8d3ef464494a121dc96ce1628454901548a66dbb
           persist-credentials: false
       - uses: actions/setup-python@v7.1.0
         with:
           python-version: ${{ matrix.python }}
-      - name: Test FAQ responses offline
+      - name: Test FAQ and Updates responses offline
         run: |
           git rev-parse HEAD
           python --version
