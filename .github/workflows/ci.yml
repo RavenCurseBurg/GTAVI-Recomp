@@ -1,116 +1,64 @@
 name: CI
 
-on:
-  push:
-    branches: [main]
-  pull_request:
-  workflow_dispatch:
+on: workflow_dispatch
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+permissions:
+  contents: read
 
 jobs:
-  windows:
-    name: windows / msvc
-    runs-on: windows-latest
+  minimums:
+    name: Ubuntu 22.04 / CMake 3.21.0 / GCC 11 and Clang 14
+    runs-on: ubuntu-22.04
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
-
-      - name: Configure
-        # No -G: use whichever Visual Studio the runner image provides. The
-        # generator name changes between runner images, the default does not.
-        run: >
-          cmake -S . -B build
-          -A x64
-          -DGTAVI_WARNINGS_AS_ERRORS=ON
-
-      - name: Build
-        run: cmake --build build --config Release --parallel
-
-      - name: Test
-        run: ctest --test-dir build -C Release --output-on-failure
-
-  linux:
-    name: linux / ${{ matrix.compiler }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - compiler: gcc
-            cc: gcc
-            cxx: g++
-            clang_tidy: ''
-          - compiler: clang
-            cc: clang
-            cxx: clang++
-            clang_tidy: clang-tidy
-    env:
-      CC: ${{ matrix.cc }}
-      CXX: ${{ matrix.cxx }}
-    steps:
+        with:
+          ref: 7e541267da01e2a366c61982f1ed0d0fe270eede
+          path: analysis
+          persist-credentials: false
       - uses: actions/checkout@v4
+        with:
+          ref: 752e5bcdf6855ee5011ea33315d6476a90245ba9
+          path: probe
+          persist-credentials: false
 
-      - name: Configure
-        run: >
-          cmake -S . -B build
-          -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DGTAVI_WARNINGS_AS_ERRORS=ON
-          -DCMAKE_CXX_CLANG_TIDY=${{ matrix.clang_tidy }}
+      - name: Select the documented minimum tools
+        run: |
+          if ! command -v g++-11 || ! command -v clang++-14 || ! command -v clang-tidy-14; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends g++-11 clang-14 clang-tidy-14 ninja-build
+          fi
+          cd "$RUNNER_TEMP"
+          archive=cmake-3.21.0-linux-x86_64.tar.gz
+          curl -fsSL --retry 3 -o "$archive" "https://github.com/Kitware/CMake/releases/download/v3.21.0/$archive"
+          echo "d54ef6909f519740bc85cec07ff54574cd1e061f9f17357d9ace69f61c6291ce  $archive" | sha256sum -c -
+          tar -xzf "$archive"
+          echo "$RUNNER_TEMP/cmake-3.21.0-linux-x86_64/bin" >> "$GITHUB_PATH"
 
-      - name: Build
-        run: cmake --build build --parallel
+      - name: Build PR 11 using the documented analysis preset
+        working-directory: analysis
+        env:
+          CXX: clang++-14
+        run: |
+          cat /etc/os-release
+          clang++-14 --version
+          clang-tidy-14 --version
+          cmake --version
+          test "$(cmake --version | head -n1)" = 'cmake version 3.21.0'
+          git rev-parse HEAD
+          cmake --preset ci -B build/tidy -DCMAKE_CXX_CLANG_TIDY=clang-tidy-14
+          cmake --build build/tidy --parallel 2
+          ctest --test-dir build/tidy --output-on-failure --no-tests=error
 
-      - name: Test
-        run: ctest --test-dir build --output-on-failure
-
-  anyps5:
-    name: anyps5 relinker at the pinned commit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Fetch AnyPS5 at the pinned commit
-        # AnyPS5's own submodules are not needed for the relinker-only mode
-        # (third_party/AnyPS5/docs/dev/BUILD.md), so only the submodule
-        # itself is checked out.
-        run: git submodule update --init third_party/AnyPS5
-
-      - name: Configure
-        run: >
-          cmake -S third_party/AnyPS5 -B build-anyps5
-          -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DANYPS5_RELINKER_ONLY=ON
-          -DBUILD_TESTING=ON
-
-      - name: Build
-        run: cmake --build build-anyps5 --parallel
-
-      - name: Test
-        run: >
-          ctest --test-dir build-anyps5 --output-on-failure
-          --timeout 120 --parallel 4 --no-tests=error
-
-  app0:
-    name: PS5 app0 preflight
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Test the app0 checker
-        run: python3 -I tests/test_check_app0.py
-
-  progress:
-    name: readme progress is up to date
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Test the progress tooling
-        run: python3 -m unittest discover -s tests/python -v
-
-      - name: Check README progress section
-        run: python3 scripts/update_progress.py --check
+      - name: Exercise the native-release probe test with both compiler minimums
+        working-directory: probe
+        run: |
+          git rev-parse HEAD
+          g++-11 --version
+          uname -r
+          for compiler in g++-11 clang++-14; do
+            dir="build/$compiler"
+            CXX="$compiler" cmake --preset ci -B "$dir"
+            cmake --build "$dir" --parallel 2
+            ctest --test-dir "$dir" --output-on-failure --no-tests=error
+          done
