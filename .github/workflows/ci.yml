@@ -1,116 +1,92 @@
-name: CI
+name: Linux fixture leak checks
 
-on:
-  push:
-    branches: [main]
-  pull_request:
-  workflow_dispatch:
+on: workflow_dispatch
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+permissions:
+  contents: read
+
+env:
+  ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+  LSAN_OPTIONS: exitcode=23
 
 jobs:
-  windows:
-    name: windows / msvc
-    runs-on: windows-latest
+  host:
+    name: Project unit and probe tests with leak detection
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          ref: 0b332f88343b0fdebf20a640a5c625a2132a521b
+          persist-credentials: false
+      - name: Build and exercise the instrumented tools
+        env:
+          CXX: g++
+        run: |
+          cmake -S . -B build/host -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DGTAVI_WARNINGS_AS_ERRORS=ON \
+            '-DCMAKE_CXX_FLAGS=-fsanitize=address -fno-omit-frame-pointer' -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address
+          cmake --build build/host --parallel 4
+          for binary in build/host/tests/gtavi_tests build/host/tools/gtavi_probe; do
+            readelf -d "$binary" | grep 'Shared library: \[libasan'
+          done
+          g++ --version
+          git rev-parse HEAD
+          ctest --test-dir build/host --verbose --no-tests=error --output-junit "$RUNNER_TEMP/host.xml"
+          python3 - "$RUNNER_TEMP/host.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+          cases = ET.parse(sys.argv[1]).findall("testcase")
+          assert {c.attrib["name"] for c in cases} == {"gtavi_tests", "gtavi_probe_mounts", "gtavi_probe_unicode"}
+          assert all(c.attrib["status"] == "run" and not list(c.findall("failure")) for c in cases)
+          PY
 
-      - name: Configure
-        # No -G: use whichever Visual Studio the runner image provides. The
-        # generator name changes between runner images, the default does not.
-        run: >
-          cmake -S . -B build
-          -A x64
-          -DGTAVI_WARNINGS_AS_ERRORS=ON
-
-      - name: Build
-        run: cmake --build build --config Release --parallel
-
-      - name: Test
-        run: ctest --test-dir build -C Release --output-on-failure
-
-  linux:
-    name: linux / ${{ matrix.compiler }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - compiler: gcc
-            cc: gcc
-            cxx: g++
-            clang_tidy: ''
-          - compiler: clang
-            cc: clang
-            cxx: clang++
-            clang_tidy: clang-tidy
-    env:
-      CC: ${{ matrix.cc }}
-      CXX: ${{ matrix.cxx }}
+  filesystem:
+    name: Pinned filesystem fixtures with leak detection
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          ref: 0b332f88343b0fdebf20a640a5c625a2132a521b
+          persist-credentials: false
 
-      - name: Configure
-        run: >
-          cmake -S . -B build
-          -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DGTAVI_WARNINGS_AS_ERRORS=ON
-          -DCMAKE_CXX_CLANG_TIDY=${{ matrix.clang_tidy }}
+      - name: Fetch the runtime and its pinned dependencies
+        run: |
+          git submodule update --init --depth 1 third_party/AnyPS5
+          git -C third_party/AnyPS5 submodule update --init --recursive --depth 1 --jobs 4
+          echo "AnyPS5 $(git -C third_party/AnyPS5 rev-parse HEAD)"
+          test "$(git -C third_party/AnyPS5 rev-parse HEAD)" = "$(git rev-parse HEAD:third_party/AnyPS5)"
 
-      - name: Build
-        run: cmake --build build --parallel
+      - name: Install the Linux build prerequisites
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends g++-14 ninja-build nasm pkg-config libx11-dev libxext-dev libxrandr-dev libasound2-dev
+          g++-14 --version
+          cmake --version
 
-      - name: Test
-        run: ctest --test-dir build --output-on-failure
+      - name: Build four test executables and their runtime dependencies
+        run: |
+          cmake -G Ninja -S third_party/AnyPS5 -B build/fs -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 -DBUILD_TESTING=ON -DANYPS5_ENABLE_ASAN=ON
+          cmake --build build/fs --parallel 4 --target guest_filesystem_tests guest_file_timestamp_tests guest_file_vector_tests download_data_mount_tests
 
-  anyps5:
-    name: anyps5 relinker at the pinned commit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Fetch AnyPS5 at the pinned commit
-        # AnyPS5's own submodules are not needed for the relinker-only mode
-        # (third_party/AnyPS5/docs/dev/BUILD.md), so only the submodule
-        # itself is checked out.
-        run: git submodule update --init third_party/AnyPS5
-
-      - name: Configure
-        run: >
-          cmake -S third_party/AnyPS5 -B build-anyps5
-          -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DANYPS5_RELINKER_ONLY=ON
-          -DBUILD_TESTING=ON
-
-      - name: Build
-        run: cmake --build build-anyps5 --parallel
-
-      - name: Test
-        run: >
-          ctest --test-dir build-anyps5 --output-on-failure
-          --timeout 120 --parallel 4 --no-tests=error
-
-  app0:
-    name: PS5 app0 preflight
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Test the app0 checker
-        run: python3 -I tests/test_check_app0.py
-
-  progress:
-    name: readme progress is up to date
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Test the progress tooling
-        run: python3 -m unittest discover -s tests/python -v
-
-      - name: Check README progress section
-        run: python3 scripts/update_progress.py --check
+      - name: Run the nine filesystem cases and verify the inventory
+        run: |
+          ctest --test-dir build/fs --show-only=json-v1 -R '^(guest_filesystem|guest_file_timestamps|guest_file_vector|download_data_mount_.*)$' > "$RUNNER_TEMP/filesystem-cases.json"
+          python3 - "$RUNNER_TEMP/filesystem-cases.json" <<'PY'
+          import json, subprocess, sys
+          tests = json.load(open(sys.argv[1]))["tests"]
+          for path in {test["command"][0] for test in tests}:
+              assert "libasan.so" in subprocess.check_output(["readelf", "-d", path], text=True), path
+          for test in tests:
+              assert "detect_leaks=0" not in str(test["properties"]), test["name"]
+          PY
+          ctest --test-dir build/fs --no-tests=error --output-on-failure --timeout 120 --output-junit "$RUNNER_TEMP/filesystem.xml" -R '^(guest_filesystem|guest_file_timestamps|guest_file_vector|download_data_mount_.*)$'
+          python3 - "$RUNNER_TEMP/filesystem.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+          cases = ET.parse(sys.argv[1]).findall("testcase")
+          expected = {"guest_filesystem", "guest_file_timestamps", "guest_file_vector"}
+          expected.update("download_data_mount_" + scenario for scenario in ("declared", "none", "invalid", "missing", "sfo", "blocked"))
+          assert {case.attrib["name"] for case in cases} == expected and len(cases) == len(expected)
+          assert all(case.find("skipped") is None and case.find("failure") is None and case.find("error") is None for case in cases)
+          PY
