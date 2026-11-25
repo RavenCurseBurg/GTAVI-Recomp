@@ -2,7 +2,7 @@ name: Pages packaging comparison
 
 on:
   push:
-    branches: [verify/node24-pages-artifact]
+    branches: [verify/pages-runtime-current]
 
 permissions:
   contents: read
@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: 5ba458fa6070fb7cc3ced42d3d4d96a73329682e
+          ref: 933cc256f0975db317f7457c8ebac1f98cd6d523
           persist-credentials: false
       - name: Build the candidate site and add controlled archive fixtures
         run: |
