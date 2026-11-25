@@ -62,7 +62,7 @@ jobs:
           ANYPS5_REQUIRE_VULKAN: "1"
           GALLIUM_OVERRIDE_CPU_CAPS: avx
         run: |
-          ctest --test-dir build/runtime --verbose --timeout 120 --no-tests=error \
+          ctest --test-dir build/runtime --verbose --timeout 120 --no-tests=error --test-output-size-passed 262144 \
             --output-junit "$RUNNER_TEMP/rendering.xml" \
             -R '^agc_driver_(color565_target|color_write_mask_dynamic(_in_pipeline|_unsuppressed)?|depth_range_remap_draw)$'
           python3 - "$RUNNER_TEMP/rendering.xml" <<'PY'
