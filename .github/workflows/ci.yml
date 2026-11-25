@@ -11,9 +11,9 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 8
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
-          ref: 6a92807b621bcf38fa692ed29d6bda3fe4ca5e21
+          ref: 3f087def85c9b121f093242e679c6a4e48b68169
           persist-credentials: false
 
       - name: Check the environment after calling vcvars64.bat from plain PowerShell
@@ -47,3 +47,36 @@ jobs:
         run: |
           call "%GTAVI_VCVARS%" || exit /b 1
           powershell -NoLogo -NoProfile -NonInteractive -File "%GTAVI_BUILD_SCRIPT%"
+
+      - name: Run the documented Ninja output from the repository root
+        shell: pwsh
+        run: |
+          $guide = Get-Content -LiteralPath docs/build.md -Raw
+          if (!$guide.Contains('./build/tools/gtavi_probe --mount D:/games')) { throw 'Guide path changed' }
+          $lines = ./build/tools/gtavi_probe --mount D:/games --to-posix "D:\PS5\app0" --to-windows /games/PS5/app0
+          if ($LASTEXITCODE -or $lines -notcontains 'D:\PS5\app0 -> /games/PS5/app0' -or $lines -notcontains '/games/PS5/app0 -> D:\PS5\app0') { throw 'Ninja probe mismatch' }
+          $lines
+
+  visual-studio:
+    name: Use the default Visual Studio generator from plain PowerShell
+    runs-on: windows-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: 3f087def85c9b121f093242e679c6a4e48b68169
+          persist-credentials: false
+      - shell: pwsh
+        run: |
+          $guide = (Get-Content -LiteralPath docs/build.md -Raw).Replace("`r`n", "`n")
+          $commands = @('cmake -S . -B build -A x64','cmake --build build --config Debug','ctest --test-dir build -C Debug --output-on-failure')
+          if (!$guide.Contains(($commands -join "`n")) -or !$guide.Contains('.\build\tools\Debug\gtavi_probe.exe')) { throw 'Guide commands changed' }
+          cmake -S . -B build -A x64
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build build --config Debug
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ctest --test-dir build -C Debug --output-on-failure
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $lines = .\build\tools\Debug\gtavi_probe.exe --to-posix "C:\Games\GTA VI\data" --to-windows /mnt/c/Games
+          if ($LASTEXITCODE -or $lines -notcontains 'C:\Games\GTA VI\data -> /mnt/c/Games/GTA VI/data' -or $lines -notcontains '/mnt/c/Games -> C:\Games') { throw 'Visual Studio probe mismatch' }
+          $lines
