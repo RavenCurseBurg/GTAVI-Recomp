@@ -143,7 +143,7 @@ Implement the foundational translation layer.
 - [x] Implement directory and metadata handling. (AnyPS5:
       `libkernel/File/src/DirectoryDescriptor.cpp`)
 - [ ] Handle permissions and access control differences.
-- [x] Implement file operation testing. ([AnyPS5 `libkernel` tests](docs/build.md#testing-file-operations-in-pinned-anyps5)
+- [x] Implement file operation testing. ([AnyPS5 `libkernel` tests](docs/testing-anyps5.md#filesystem)
       cover filesystem operations, timestamps, vectored I/O, mounts and Windows file locks.)
 
 ### Memory & Processes
@@ -219,7 +219,8 @@ Implement the guest's major subsystems.
 - [x] Implement basic audio output for Windows and Linux hosts. (AnyPS5:
       `libSceAudioOut` on SDL2)
 - [ ] Complete the audio output library (78/219 functions).
-- [ ] Test device handling and format conversion.
+- [x] Test device handling and format conversion. ([AnyPS5 audio fixtures](docs/testing-anyps5.md#audio-output)
+      exercise simulated endpoints, PCM formats and Linux resampling.)
 
 ### Input
 
@@ -228,7 +229,8 @@ Implement the guest's major subsystems.
 - [ ] Complete the controller library (56/222 functions).
 - [ ] Implement haptics and adaptive triggers where feasible. (AnyPS5 has rumble;
       adaptive triggers unverified)
-- [ ] Test input behaviour.
+- [x] Test input behaviour. ([AnyPS5 controller fixtures](docs/testing-anyps5.md#controller-input)
+      exercise command files, scripted input and recorded controller state.)
 
 ## Phase 7: Integration & Compatibility
 

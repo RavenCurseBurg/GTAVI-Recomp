@@ -3,6 +3,7 @@
 | Document | Purpose |
 | --- | --- |
 | [build.md](build.md) | Prerequisites, build commands, test commands, project layout |
+| [testing-anyps5.md](testing-anyps5.md) | Run the pinned filesystem, audio and controller tests with synthetic inputs |
 | [adr/0003-build-on-anyps5-relinker.md](adr/0003-build-on-anyps5-relinker.md) | **Accepted:** build on AnyPS5's relinker and system libraries |
 | [adr/0002-ps5-to-pc-library-translation.md](adr/0002-ps5-to-pc-library-translation.md) | Superseded: library translation with this project's own runtime loader |
 | [adr/0001-project-scope.md](adr/0001-project-scope.md) | Superseded: earlier translation-vs-recompilation framing |

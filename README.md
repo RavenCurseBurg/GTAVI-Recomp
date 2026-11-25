@@ -39,7 +39,7 @@ upstream library work in AnyPS5, tooling) continues.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="progress/roadmap-dark.svg">
-  <img src="progress/roadmap-light.svg" width="820" alt="Roadmap progress: 77 of 138 tasks done (56%), 15 blocked on game files">
+  <img src="progress/roadmap-light.svg" width="820" alt="Roadmap progress: 79 of 138 tasks done (57%), 15 blocked on game files">
 </picture>
 
 Details in [TODO.md](TODO.md).

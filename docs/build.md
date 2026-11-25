@@ -119,30 +119,8 @@ identity fields. Relinking and execution require further verification.
 
 Run the generated-fixture tests with `python -I tests/test_check_app0.py`.
 
-## Testing file operations in pinned AnyPS5
-
-Use the [AnyPS5 full-build prerequisites](https://github.com/boykopovar/AnyPS5/blob/15826135019b8c7de27f42661a850a1dd9750932/docs/dev/BUILD.md#requirements)
-for your host. On Windows, use a short checkout path and put the x86-64
-MinGW-w64 GCC toolchain on `PATH`. Run the commands from the GTAVI-Recomp root.
-The build targets four test programs and their dependencies.
-
-```console
-git submodule update --init --recursive third_party/AnyPS5
-cmake -S third_party/AnyPS5 -B build/fs -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DBUILD_TESTING=ON
-cmake --build build/fs --parallel 4 --target guest_filesystem_tests guest_file_timestamp_tests guest_file_vector_tests download_data_mount_tests
-ctest --test-dir build/fs --output-on-failure --no-tests=error -R "^(guest_filesystem|guest_file_timestamps|guest_file_vector|download_data_mount_.*)$"
-```
-
-At `1582613`, these nine tests passed on Ubuntu 24.04 (GCC 14.2) and Windows
-x64 (MinGW-w64 GCC 15.2). Three exercise file and directory operations,
-timestamps, and vectored I/O. Six exercise download-data mounts using generated
-application directories. The Windows build provides seven additional file-lock
-cases, including contention between threads and processes.
-
-```console
-cmake --build build/fs --parallel 4 --target guest_file_lock_tests
-ctest --test-dir build/fs --output-on-failure --no-tests=error -R "^guest_file_lock_"
-```
+For the runtime libraries themselves, see [Testing pinned AnyPS5 libraries](testing-anyps5.md).
+The guide gives build targets and CTest selections for filesystem, audio and controller fixtures.
 
 ## Layout
 
