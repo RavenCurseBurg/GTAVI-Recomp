@@ -28,6 +28,7 @@ checkout of the repository and always shows what is on main.
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import logging
 import os
@@ -48,6 +49,7 @@ FAQ_URL = "https://raw.githubusercontent.com/JamesCicada/GTAVI-Recomp/main/docs/
 REPO_URL = "https://github.com/JamesCicada/GTAVI-Recomp"
 UPDATES_ROLE = "Updates"
 CACHE_SECONDS = 300
+FAQ_AUTOCOMPLETE_TIMEOUT = 1.0
 COLOUR = 0x2F81F7
 JOIN_COLOUR = 0x2EA043
 LEAVE_COLOUR = 0xF85149
@@ -68,8 +70,11 @@ class Cached:
         self.value = None
         self.fetched = 0.0
 
+    def is_fresh(self) -> bool:
+        return self.value is not None and time.monotonic() - self.fetched < CACHE_SECONDS
+
     async def get(self, session: aiohttp.ClientSession):
-        if self.value is not None and time.monotonic() - self.fetched < CACHE_SECONDS:
+        if self.is_fresh():
             return self.value
         try:
             async with session.get(self.url, timeout=aiohttp.ClientTimeout(total=15)) as response:
@@ -341,36 +346,55 @@ def register_commands(bot: CalHampton) -> None:
     @app_commands.describe(topic="The question, or a few words from it. Leave empty to list them.")
     @app_commands.guild_only()
     async def faq(interaction: discord.Interaction, topic: str | None = None) -> None:
-        try:
-            pairs = await bot.faq.get(bot.session)
-        except Exception:
-            await interaction.response.send_message("I couldn't load the FAQ right now. Try `#faq`.", ephemeral=True)
-            return
+        loading = not bot.faq.is_fresh()
+
+        async def reply_privately(content=None, *, embed=None):
+            if loading:
+                await interaction.edit_original_response(content=content, embed=embed)
+            else:
+                await interaction.response.send_message(content=content, embed=embed, ephemeral=True)
+
+        if loading:
+            # A deferred private reply also makes its first followup private.
+            # Use a regular private message so a matching answer can be public.
+            await interaction.response.send_message("Loading the FAQ…", ephemeral=True)
+            try:
+                pairs = await bot.faq.get(bot.session)
+            except Exception:
+                await reply_privately("I couldn't load the FAQ right now. Try `#faq`.")
+                return
+        else:
+            pairs = bot.faq.value
 
         if not topic:
             listing = "\n".join(f"• {q}" for q, _ in pairs)
             embed = discord.Embed(title="FAQ", colour=COLOUR, description=listing)
             embed.set_footer(text="Use /faq topic:<question> for an answer")
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await reply_privately(embed=embed)
             return
 
         found = find_faq(pairs, topic)
         if not found:
-            await interaction.response.send_message(
+            await reply_privately(
                 "I don't have an answer for that. Try `/faq` to see the questions, or ask in `#general`.",
-                ephemeral=True,
             )
             return
         question, answer = found
-        await interaction.response.send_message(
+        send = interaction.followup.send if loading else interaction.response.send_message
+        await send(
             embed=discord.Embed(title=question, description=answer, colour=COLOUR),
             allowed_mentions=discord.AllowedMentions.none(),
         )
+        if loading:
+            await interaction.delete_original_response()
 
     @faq.autocomplete("topic")
     async def faq_topics(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
         try:
-            pairs = await bot.faq.get(bot.session)
+            # Autocomplete cannot be deferred. Leave time to submit the choices.
+            pairs = await asyncio.wait_for(bot.faq.get(bot.session), timeout=FAQ_AUTOCOMPLETE_TIMEOUT)
+        except asyncio.TimeoutError:
+            pairs = bot.faq.value or []
         except Exception:
             return []
         current = current.lower()

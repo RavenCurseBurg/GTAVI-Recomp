@@ -107,3 +107,6 @@ $env:DISCORD_BOT_TOKEN = Read-Host -MaskInput "Bot token"
 ```
 
 Only run one copy at a time: two copies would both answer each command.
+
+With the bot dependencies installed, run `python -m unittest discover -s bot`
+from the repository root to test FAQ responses offline.
