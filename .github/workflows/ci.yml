@@ -8,7 +8,7 @@ permissions:
 jobs:
   developer-shell:
     name: Compare the Windows shell setup for manual Ninja builds
-    runs-on: windows-latest
+    runs-on: windows-2022
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v7
@@ -57,9 +57,30 @@ jobs:
           if ($LASTEXITCODE -or $lines -notcontains 'D:\PS5\app0 -> /games/PS5/app0' -or $lines -notcontains '/games/PS5/app0 -> D:\PS5\app0') { throw 'Ninja probe mismatch' }
           $lines
 
+      - name: Build with the Release helper and compare the probe to Windows
+        shell: pwsh
+        run: |
+          $helper = Join-Path $env:GITHUB_WORKSPACE 'scripts\build-windows.bat'
+          Push-Location -LiteralPath $env:RUNNER_TEMP
+          try {
+            & $helper Release
+            if ($LASTEXITCODE) { throw "Build helper exited $LASTEXITCODE" }
+          } finally { Pop-Location }
+          $cache = Get-Content -LiteralPath 'build/windows/CMakeCache.txt'
+          foreach ($entry in 'CMAKE_GENERATOR:INTERNAL=Ninja','CMAKE_BUILD_TYPE:STRING=Release','GTAVI_WARNINGS_AS_ERRORS:BOOL=ON') {
+            if ($cache -notcontains $entry) { throw "Missing cache setting $entry" }
+          }
+          $windows = Get-CimInstance Win32_OperatingSystem
+          $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+          "$($windows.Caption) / $($windows.Version) / $arch"
+          if ($windows.Caption -notmatch 'Server 2022' -or $arch -ne 'X64') { throw 'Unexpected host' }
+          $lines = & '.\build\windows\tools\gtavi_probe.exe'
+          if ($LASTEXITCODE -or $lines -notcontains 'platform:     windows' -or $lines -notcontains "os version:   $($windows.Version)" -or $lines -notcontains 'architecture: x86_64') { throw "Host facts disagree: $lines" }
+          $lines
+
   visual-studio:
     name: Use the default Visual Studio generator from plain PowerShell
-    runs-on: windows-latest
+    runs-on: windows-2022
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v7
