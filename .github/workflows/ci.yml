@@ -12,7 +12,7 @@ env:
 jobs:
   host:
     name: Project unit and probe tests with leak detection
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -42,7 +42,7 @@ jobs:
 
   filesystem:
     name: Pinned filesystem fixtures with leak detection
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -63,6 +63,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends g++-14 ninja-build nasm pkg-config libx11-dev libxext-dev libxrandr-dev libasound2-dev
           g++-14 --version
           cmake --version
+          getconf GNU_LIBC_VERSION
+          dpkg-query -W libc6
 
       - name: Build four test executables and their runtime dependencies
         run: |
