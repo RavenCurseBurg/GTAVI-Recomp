@@ -80,6 +80,10 @@ ping anyone, whatever a commit message contains.
 
 ## Building the server
 
+Run `python scripts/discord_setup.py --offline` to preview every welcome, rules
+and FAQ message from this file. It prints the embed sizes and complete message
+payloads before you need a bot token.
+
 1. In the [Discord Developer Portal](https://discord.com/developers/applications),
    create an application, open **Bot**, and reset the token to copy it. Treat it
    like a password: never commit it or paste it anywhere public.

@@ -5,6 +5,9 @@ The layout below mirrors docs/community/discord.md, and the welcome, rules and
 FAQ messages are read from that file, so it stays the source of truth.
 
 Usage:
+    # Preview the welcome, rules and FAQ messages locally.
+    python scripts/discord_setup.py --offline
+
     # 1. Plan only: reads the server and prints what would change.
     python scripts/discord_setup.py
     # 2. Make the changes.
@@ -206,6 +209,11 @@ def embeds_for(text: str, title: str) -> list[dict]:
     ]
 
 
+def message_payload(embed: dict) -> dict:
+    return {"embeds": [{k: v for k, v in embed.items() if v is not None}],
+            "allowed_mentions": {"parse": []}}
+
+
 # --------------------------------------------------------------------------
 # Plan and apply
 
@@ -225,11 +233,17 @@ def main() -> int:
                 for channel, heading in MESSAGES.items()}
 
     if args.offline:
+        preview = {}
         for channel, embeds in messages.items():
             print(f"#{channel}: {len(embeds)} embed(s)")
             for embed in embeds:
                 print(f"  {len(embed['description'])} characters")
-        print(json.dumps(messages["rules"], indent=2, ensure_ascii=False)[:1500])
+            preview[channel] = [message_payload(embed) for embed in embeds]
+        try:
+            print(json.dumps(preview, indent=2, ensure_ascii=False))
+        except UnicodeEncodeError:
+            # Preserve the message text as JSON escapes on legacy output encodings.
+            print(json.dumps(preview, indent=2))
         return 0
 
     token = os.environ.get("DISCORD_BOT_TOKEN", "").strip()
@@ -346,9 +360,7 @@ def main() -> int:
         print(f"+ post {MESSAGES[channel_name]} in #{channel_name} ({len(embeds)} message(s))")
         if apply:
             for embed in embeds:
-                api.call("POST", f"/channels/{channel['id']}/messages",
-                         {"embeds": [{k: v for k, v in embed.items() if v is not None}],
-                          "allowed_mentions": {"parse": []}})
+                api.call("POST", f"/channels/{channel['id']}/messages", message_payload(embed))
 
     # Webhooks
     if args.webhooks:
