@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.21)
+project(MountLookupComparison LANGUAGES CXX)
+enable_testing()
+add_subdirectory("${GTAVI_SOURCE_DIR}" gtavi)
+add_executable(lookup_measure lookup.cpp)
+target_link_libraries(lookup_measure PRIVATE gtavi::core)
+set_target_properties(lookup_measure PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/bin")
