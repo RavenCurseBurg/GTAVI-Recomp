@@ -1,0 +1,27 @@
+name: Probe Unicode evidence
+
+on:
+  push:
+    branches: [verify/probe-unicode]
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            configure: -A x64
+            probe: build/tools/Release/gtavi_probe.exe
+          - os: ubuntu-latest
+            configure: -G Ninja -DCMAKE_BUILD_TYPE=Release
+            probe: build/tools/gtavi_probe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build ${{ matrix.configure }} -DGTAVI_WARNINGS_AS_ERRORS=ON
+      - run: cmake --build build --config Release --parallel
+      - run: ctest --test-dir build -C Release --output-on-failure
+      - run: python tests/compare_probe_unicode.py ${{ matrix.probe }}
