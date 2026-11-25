@@ -23,15 +23,10 @@ scripts\build-windows.bat Debug --clean
 It configures with `-DGTAVI_WARNINGS_AS_ERRORS=ON`, so warnings fail locally the
 same way they do in CI. It leaves the caller's environment unchanged.
 
-To drive the toolchain yourself, note that the compiler is not on `PATH` by
-default. Run the commands from a Developer PowerShell / Developer Command
-Prompt, or initialise the environment first:
-
-```powershell
-& "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
-```
-
-Then:
+To build with Ninja manually, open the **x64 Native Tools Command Prompt for VS**
+from the Start menu. To use PowerShell, start `powershell` from that prompt so it
+inherits the MSVC compiler and SDK environment. In either shell, change to the
+repository root and run the following commands.
 
 ```powershell
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
