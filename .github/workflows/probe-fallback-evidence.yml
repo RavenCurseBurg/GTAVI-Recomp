@@ -1,0 +1,43 @@
+name: Native probe fallback evidence
+
+on:
+  push:
+    branches: [verify/probe-host-fallback]
+
+permissions:
+  contents: read
+
+jobs:
+  darwin:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check historical behavior and current probe on Darwin
+        shell: bash
+        run: |
+          set -euo pipefail
+          uname -a
+          sw_vers
+          git worktree add --detach "$RUNNER_TEMP/before" c1ab0d27cc09c4737ccdbca9bff73a7a5a5b0dc9
+          git worktree add --detach "$RUNNER_TEMP/native" b3338f4a8d7cd8547289cf710b46d7f2366f87ca
+          git worktree add --detach "$RUNNER_TEMP/unicode" 6c177f51b84da918b61902556f9a41da1cda791a
+          for revision in before native unicode; do
+            src="$RUNNER_TEMP/$revision"
+            out="$RUNNER_TEMP/build-$revision"
+            cmake -S "$src" -B "$out" -G Ninja -DCMAKE_BUILD_TYPE=Release -DGTAVI_WARNINGS_AS_ERRORS=ON
+            cmake --build "$out" --parallel 3
+            if [[ "$revision" == before ]]; then
+              result=0
+              "$out/tools/gtavi_probe" --to-posix 'D:\Music' >"$RUNNER_TEMP/old-output" || result=$?
+              test "$result" -eq 1
+              grep -F '/mnt/d/Music' "$RUNNER_TEMP/old-output"
+              echo "Historical probe translated the path but exited $result."
+            else
+              ctest --test-dir "$out" --output-on-failure --no-tests=error
+              cmake "-DPROBE=$out/tools/gtavi_probe" -P "$RUNNER_TEMP/native/tests/probe_unsupported_host.cmake"
+            fi
+          done
