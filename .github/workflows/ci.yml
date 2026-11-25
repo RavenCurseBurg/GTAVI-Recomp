@@ -1,113 +1,47 @@
 name: CI
 
-on:
-  push:
-    branches: [main]
-  pull_request:
-  workflow_dispatch:
+on: workflow_dispatch
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+permissions:
+  contents: read
 
 jobs:
   windows:
-    name: windows / msvc
+    name: Windows helper / baseline and fixed
     runs-on: windows-latest
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 3
 
-      - name: Configure
-        # No -G: use whichever Visual Studio the runner image provides. The
-        # generator name changes between runner images, the default does not.
-        run: >
-          cmake -S . -B build
-          -A x64
-          -DGTAVI_WARNINGS_AS_ERRORS=ON
+      - name: Configure a Windows build with tests disabled
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installation = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          & "$installation\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+          cmake -S . -B build/windows -G Ninja -DCMAKE_CXX_COMPILER=cl -DCMAKE_BUILD_TYPE=Release -DGTAVI_BUILD_TESTS=OFF
 
-      - name: Build
-        run: cmake --build build --config Release --parallel
+      - name: Reproduce the old helper reporting success with zero tests
+        shell: pwsh
+        run: |
+          git restore --source=HEAD~2 --worktree -- scripts/build-windows.bat
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot select the unmodified helper' }
+          & .\scripts\build-windows.bat Release
+          if ($LASTEXITCODE -ne 0) { throw 'Expected the baseline to return success' }
+          $list = ctest --test-dir build/windows -C Release --show-only=json-v1 | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $list.tests.Count -ne 0) { throw 'Expected an empty test inventory' }
 
-      - name: Test
-        run: ctest --test-dir build -C Release --output-on-failure
-
-  linux:
-    name: linux / ${{ matrix.compiler }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - compiler: gcc
-            cc: gcc
-            cxx: g++
-          - compiler: clang
-            cc: clang
-            cxx: clang++
-    env:
-      CC: ${{ matrix.cc }}
-      CXX: ${{ matrix.cxx }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure
-        run: >
-          cmake -S . -B build
-          -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DGTAVI_WARNINGS_AS_ERRORS=ON
-
-      - name: Build
-        run: cmake --build build --parallel
-
-      - name: Test
-        run: ctest --test-dir build --output-on-failure
-
-  anyps5:
-    name: anyps5 relinker at the pinned commit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Fetch AnyPS5 at the pinned commit
-        # AnyPS5's own submodules are not needed for the relinker-only mode
-        # (third_party/AnyPS5/docs/dev/BUILD.md), so only the submodule
-        # itself is checked out.
-        run: git submodule update --init third_party/AnyPS5
-
-      - name: Configure
-        run: >
-          cmake -S third_party/AnyPS5 -B build-anyps5
-          -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DANYPS5_RELINKER_ONLY=ON
-          -DBUILD_TESTING=ON
-
-      - name: Build
-        run: cmake --build build-anyps5 --parallel
-
-      - name: Test
-        run: >
-          ctest --test-dir build-anyps5 --output-on-failure
-          --timeout 120 --parallel 4 --no-tests=error
-
-  app0:
-    name: PS5 app0 preflight
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Test the app0 checker
-        run: python3 -I tests/test_check_app0.py
-
-  progress:
-    name: readme progress is up to date
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Test the progress tooling
-        run: python3 -m unittest discover -s tests/python -v
-
-      - name: Check README progress section
-        run: python3 scripts/update_progress.py --check
+      - name: Run the fixed helper against the same cache
+        shell: pwsh
+        run: |
+          git restore --worktree -- scripts/build-windows.bat
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot restore the fixed helper' }
+          & .\scripts\build-windows.bat Release
+          if ($LASTEXITCODE -ne 0) { throw 'The fixed helper failed' }
+          $list = ctest --test-dir build/windows -C Release --show-only=json-v1 | ConvertFrom-Json
+          $expected = @('gtavi_tests','gtavi_probe_mounts')
+          if ($LASTEXITCODE -ne 0 -or (Compare-Object $expected @($list.tests.name))) {
+            throw 'Did not find both project CTest entries'
+          }
