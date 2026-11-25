@@ -7,13 +7,13 @@ permissions:
 
 jobs:
   developer-shell:
-    name: Compare the Windows shell setup for manual Ninja builds
+    name: Build both generator examples in one checkout
     runs-on: windows-2022
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: 3f087def85c9b121f093242e679c6a4e48b68169
+          ref: 0c2c413f6543754bef07a7db60fbc13b451c139e
           persist-credentials: false
 
       - name: Check the environment after calling vcvars64.bat from plain PowerShell
@@ -57,47 +57,38 @@ jobs:
           if ($LASTEXITCODE -or $lines -notcontains 'D:\PS5\app0 -> /games/PS5/app0' -or $lines -notcontains '/games/PS5/app0 -> D:\PS5\app0') { throw 'Ninja probe mismatch' }
           $lines
 
-      - name: Build with the Release helper and compare the probe to Windows
+      - name: Check what happens when the old guide reuses Ninja's cache
         shell: pwsh
         run: |
-          $helper = Join-Path $env:GITHUB_WORKSPACE 'scripts\build-windows.bat'
-          Push-Location -LiteralPath $env:RUNNER_TEMP
-          try {
-            & $helper Release
-            if ($LASTEXITCODE) { throw "Build helper exited $LASTEXITCODE" }
-          } finally { Pop-Location }
-          $cache = Get-Content -LiteralPath 'build/windows/CMakeCache.txt'
-          foreach ($entry in 'CMAKE_GENERATOR:INTERNAL=Ninja','CMAKE_BUILD_TYPE:STRING=Release','GTAVI_WARNINGS_AS_ERRORS:BOOL=ON') {
-            if ($cache -notcontains $entry) { throw "Missing cache setting $entry" }
-          }
-          $windows = Get-CimInstance Win32_OperatingSystem
-          $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
-          "$($windows.Caption) / $($windows.Version) / $arch"
-          if ($windows.Caption -notmatch 'Server 2022' -or $arch -ne 'X64') { throw 'Unexpected host' }
-          $lines = & '.\build\windows\tools\gtavi_probe.exe'
-          if ($LASTEXITCODE -or $lines -notcontains 'platform:     windows' -or $lines -notcontains "os version:   $($windows.Version)" -or $lines -notcontains 'architecture: x86_64') { throw "Host facts disagree: $lines" }
-          $lines
+          $PSNativeCommandUseErrorActionPreference = $false
+          $output = cmake -S . -B build -A x64 2>&1
+          $code = $LASTEXITCODE
+          $message = $output -join ' '
+          $message
+          if ($code -eq 0 -or $message -notmatch 'generator platform' -or $message -notmatch 'different binary directory') { throw "Unexpected old-guide result: $code" }
+          exit 0
 
-  visual-studio:
-    name: Use the default Visual Studio generator from plain PowerShell
-    runs-on: windows-2022
-    timeout-minutes: 8
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: 3f087def85c9b121f093242e679c6a4e48b68169
-          persist-credentials: false
-      - shell: pwsh
+      - name: Build the Visual Studio example from plain PowerShell in the same checkout
+        shell: pwsh
         run: |
           $guide = (Get-Content -LiteralPath docs/build.md -Raw).Replace("`r`n", "`n")
-          $commands = @('cmake -S . -B build -A x64','cmake --build build --config Debug','ctest --test-dir build -C Debug --output-on-failure')
-          if (!$guide.Contains(($commands -join "`n")) -or !$guide.Contains('.\build\tools\Debug\gtavi_probe.exe')) { throw 'Guide commands changed' }
-          cmake -S . -B build -A x64
+          $commands = @('cmake -S . -B build/vs -A x64','cmake --build build/vs --config Debug','ctest --test-dir build/vs -C Debug --output-on-failure')
+          if (!$guide.Contains(($commands -join "`n")) -or !$guide.Contains('.\build\vs\tools\Debug\gtavi_probe.exe')) { throw 'Guide commands changed' }
+          cmake -S . -B build/vs -A x64
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cmake --build build --config Debug
+          cmake --build build/vs --config Debug
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          ctest --test-dir build -C Debug --output-on-failure
+          ctest --test-dir build/vs -C Debug --output-on-failure
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          $lines = .\build\tools\Debug\gtavi_probe.exe --to-posix "C:\Games\GTA VI\data" --to-windows /mnt/c/Games
+          $lines = .\build\vs\tools\Debug\gtavi_probe.exe --to-posix "C:\Games\GTA VI\data" --to-windows /mnt/c/Games
           if ($LASTEXITCODE -or $lines -notcontains 'C:\Games\GTA VI\data -> /mnt/c/Games/GTA VI/data' -or $lines -notcontains '/mnt/c/Games -> C:\Games') { throw 'Visual Studio probe mismatch' }
           $lines
+          $ninja = Get-Content -LiteralPath 'build/CMakeCache.txt'
+          $vs = Get-Content -LiteralPath 'build/vs/CMakeCache.txt'
+          if ($ninja -notcontains 'CMAKE_GENERATOR:INTERNAL=Ninja' -or $vs -notcontains 'CMAKE_GENERATOR:INTERNAL=Visual Studio 17 2022') { throw 'Unexpected generator cache' }
+          $os = Get-CimInstance Win32_OperatingSystem
+          if ($lines -notcontains "os version:   $($os.Version)") { throw 'Unexpected Windows version' }
+          "$($os.Caption) / $($os.Version)"
+          $cmds = .\build\tools\gtavi_probe.exe --to-posix 'C:\Games'
+          if ($LASTEXITCODE -or $cmds -notcontains 'C:\Games -> /mnt/c/Games') { throw 'Ninja probe no longer usable' }
+          'Both generator caches and both executables are present.'
