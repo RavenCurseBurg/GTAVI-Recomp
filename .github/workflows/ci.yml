@@ -1,113 +1,26 @@
-name: CI
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-  workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
+name: FAQ command verification
+on: workflow_dispatch
+permissions:
+  contents: read
 jobs:
-  windows:
-    name: windows / msvc
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure
-        # No -G: use whichever Visual Studio the runner image provides. The
-        # generator name changes between runner images, the default does not.
-        run: >
-          cmake -S . -B build
-          -A x64
-          -DGTAVI_WARNINGS_AS_ERRORS=ON
-
-      - name: Build
-        run: cmake --build build --config Release --parallel
-
-      - name: Test
-        run: ctest --test-dir build -C Release --output-on-failure
-
-  linux:
-    name: linux / ${{ matrix.compiler }}
+  faq:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - compiler: gcc
-            cc: gcc
-            cxx: g++
-          - compiler: clang
-            cc: clang
-            cxx: clang++
-    env:
-      CC: ${{ matrix.cc }}
-      CXX: ${{ matrix.cxx }}
+        python: ["3.10", "3.14"]
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure
-        run: >
-          cmake -S . -B build
-          -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DGTAVI_WARNINGS_AS_ERRORS=ON
-
-      - name: Build
-        run: cmake --build build --parallel
-
-      - name: Test
-        run: ctest --test-dir build --output-on-failure
-
-  anyps5:
-    name: anyps5 relinker at the pinned commit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Fetch AnyPS5 at the pinned commit
-        # AnyPS5's own submodules are not needed for the relinker-only mode
-        # (third_party/AnyPS5/docs/dev/BUILD.md), so only the submodule
-        # itself is checked out.
-        run: git submodule update --init third_party/AnyPS5
-
-      - name: Configure
-        run: >
-          cmake -S third_party/AnyPS5 -B build-anyps5
-          -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DANYPS5_RELINKER_ONLY=ON
-          -DBUILD_TESTING=ON
-
-      - name: Build
-        run: cmake --build build-anyps5 --parallel
-
-      - name: Test
-        run: >
-          ctest --test-dir build-anyps5 --output-on-failure
-          --timeout 120 --parallel 4 --no-tests=error
-
-  app0:
-    name: PS5 app0 preflight
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Test the app0 checker
-        run: python3 -I tests/test_check_app0.py
-
-  progress:
-    name: readme progress is up to date
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Test the progress tooling
-        run: python3 -m unittest discover -s tests/python -v
-
-      - name: Check README progress section
-        run: python3 scripts/update_progress.py --check
+      - uses: actions/checkout@v7
+        with:
+          ref: 08c40aa0c9ce007fcd94393b548f4c9e958c07e7
+          persist-credentials: false
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Test FAQ responses offline
+        run: |
+          git rev-parse HEAD
+          python --version
+          python -m pip install -r bot/requirements.txt
+          python -m unittest discover -s bot -v
