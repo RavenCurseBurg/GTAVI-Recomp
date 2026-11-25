@@ -1,0 +1,36 @@
+name: Pages packaging comparison
+
+on:
+  push:
+    branches: [verify/node24-pages-artifact]
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: 5ba458fa6070fb7cc3ced42d3d4d96a73329682e
+          persist-credentials: false
+      - name: Build the candidate site and add controlled archive fixtures
+        run: |
+          python3 scripts/update_progress.py --check --site _site
+          mkdir -p _site/.well-known _site/.github _site/.git
+          echo 'site fixture' > _site/.well-known/example.txt
+          touch _site/.nojekyll
+          echo 'excluded fixture' > _site/.github/example.txt
+          echo 'excluded fixture' > _site/.git/example.txt
+      - name: Package using the previous production settings
+        uses: actions/upload-pages-artifact@v3
+        with:
+          name: legacy-pages
+          path: _site
+      - name: Package using the candidate production settings
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+          include-hidden-files: true
