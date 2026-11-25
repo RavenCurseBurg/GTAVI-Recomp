@@ -15,7 +15,7 @@ jobs:
     name: windows / msvc
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Configure
         # No -G: use whichever Visual Studio the runner image provides. The
@@ -48,7 +48,7 @@ jobs:
       CC: ${{ matrix.cc }}
       CXX: ${{ matrix.cxx }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Configure
         run: >
@@ -67,7 +67,7 @@ jobs:
     name: anyps5 relinker at the pinned commit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Fetch AnyPS5 at the pinned commit
         # AnyPS5's own submodules are not needed for the relinker-only mode
@@ -95,7 +95,7 @@ jobs:
     name: PS5 app0 preflight
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Test the app0 checker
         run: python3 -I tests/test_check_app0.py
@@ -104,7 +104,7 @@ jobs:
     name: readme progress is up to date
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Test the progress tooling
         run: python3 -m unittest discover -s tests/python -v
