@@ -1,4 +1,4 @@
-name: Pinned offscreen color and depth fixtures
+name: Pinned VideoOut display status fixtures
 
 on: workflow_dispatch
 
@@ -29,7 +29,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends g++-14 ninja-build nasm pkg-config \
             libx11-dev libxext-dev libxrandr-dev libasound2-dev libvulkan1 mesa-vulkan-drivers vulkan-tools \
-            libpipewire-0.3-dev libpulse-dev libwayland-dev libxkbcommon-dev libegl-dev libdecor-0-dev
+            libpipewire-0.3-dev libpulse-dev libwayland-dev libxkbcommon-dev libegl-dev libdecor-0-dev xvfb xauth
           g++-14 --version
           cmake --version
           ninja --version
@@ -50,37 +50,31 @@ jobs:
           echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
           echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" >> "$GITHUB_ENV"
 
-      - name: Build the color and depth rendering fixtures
+      - name: Build the display status fixtures
         run: |
           cmake -S third_party/AnyPS5 -B build/runtime -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 -DBUILD_TESTING=ON
-          cmake --build build/runtime --parallel 4 --target agc_driver_color565_target_tests \
-            agc_driver_color_write_mask_dynamic_tests agc_driver_depth_range_remap_draw_tests
+          cmake --build build/runtime --parallel 4 --target guest_video_out_resolution_status_tests \
+            guest_video_out_current_output_mode_tests
 
-      - name: Draw and check sample colors and depth
+      - name: Check the resolution and output mode on a virtual X display
         env:
-          ANYPS5_REQUIRE_VULKAN: "1"
+          ANYPS5_REQUIRE_DISPLAY: "1"
+          SDL_VIDEODRIVER: x11
           GALLIUM_OVERRIDE_CPU_CAPS: avx
         run: |
-          ctest --test-dir build/runtime --verbose --timeout 120 --no-tests=error --test-output-size-passed 262144 \
+          xvfb-run -a -s '-screen 0 1920x1080x24' \
+            ctest --test-dir build/runtime --verbose --no-tests=error --test-output-size-passed 262144 \
             --output-junit "$RUNNER_TEMP/rendering.xml" \
-            -R '^agc_driver_(color565_target|color_write_mask_dynamic(_in_pipeline|_unsuppressed)?|depth_range_remap_draw)$'
+            -R '^guest_video_out_(resolution_status|current_output_mode)$'
           python3 - "$RUNNER_TEMP/rendering.xml" <<'PY'
           import sys
           import xml.etree.ElementTree as ET
-          expected = {
-              "agc_driver_color565_target": "44 draws plus 24 constant-blend draws passed",
-              "agc_driver_color_write_mask_dynamic": "color write mask tests passed",
-              "agc_driver_color_write_mask_dynamic_in_pipeline": "color write mask tests passed",
-              "agc_driver_color_write_mask_dynamic_unsuppressed": "color write mask tests passed",
-              "agc_driver_depth_range_remap_draw": "depth range remap draw tests passed",
-          }
+          expected = {"guest_video_out_resolution_status", "guest_video_out_current_output_mode"}
           cases = ET.parse(sys.argv[1]).findall("testcase")
           assert len(cases) == len(expected) and {c.get("name") for c in cases} == set(expected)
           for case in cases:
               assert case.get("status") == "run"
               assert all(case.find(tag) is None for tag in ("skipped", "failure", "error"))
-              needle = expected[case.get("name")]
-              lines = case.findtext("system-out", "").splitlines()
-              assert any(needle in line for line in lines), (case.get("name"), lines[-10:])
+              print(case.get("name"), case.get("status"), case.get("time"))
           PY
