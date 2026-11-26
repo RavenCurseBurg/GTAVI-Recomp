@@ -1,4 +1,4 @@
-name: Pinned Linux runtime inventory
+name: Pinned DualSense controller output fixtures
 
 on: workflow_dispatch
 
@@ -8,7 +8,7 @@ permissions:
 jobs:
   runtime:
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
         with:
@@ -39,50 +39,27 @@ jobs:
           free -h
           df -h .
 
-      - name: Configure the Release build
+      - name: Build the two controller output fixtures
         run: |
           cmake -S third_party/AnyPS5 -B build/runtime -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 -DBUILD_TESTING=ON
-          ninja -C build/runtime -n patched_libraries_tests | tail -n 1
+          cmake --build build/runtime --parallel 4 --target guest_pad_trigger_effects_tests dualsense_haptics_tests
 
-      - name: Build the loader test and all its runtime libraries
-        run: cmake --build build/runtime --parallel 4 --target patched_libraries_tests
-
-      - name: Compare the ELF library inventory with the pinned sources
+      - name: Check generated trigger commands and Bluetooth haptics reports
         run: |
-          python3 - <<'PY'
-          import struct
-          from pathlib import Path
-          root = Path("third_party/AnyPS5/core/libs/prx")
-          expected = {d.name + ".prx" for d in root.iterdir() if d.is_dir()}
-          library_dir = Path("build/runtime/core/libs/libs")
-          files = sorted(library_dir.glob("*.prx"))
-          actual = {path.name for path in files}
-          if not expected or actual != expected:
-              raise SystemExit(f"missing={sorted(expected - actual)} extra={sorted(actual - expected)}")
-          for path in files:
-              with path.open("rb") as stream:
-                  header = stream.read(20)
-              if header[:6] != b"\x7fELF\x02\x01" or struct.unpack_from("<HH", header, 16) != (3, 62):
-                  raise SystemExit(f"{path} is not a little-endian x86_64 ELF shared object")
-          print(f"Matched all {len(actual)} pinned source names to x86_64 ELF shared objects")
-          PY
-
-      - name: Load every patched runtime library
-        run: |
-          ctest --test-dir build/runtime -R '^patched_libraries$' --verbose --timeout 180 \
-            --no-tests=error --output-junit "$RUNNER_TEMP/patched.xml"
-          python3 - "$RUNNER_TEMP/patched.xml" <<'PY'
-          from pathlib import Path
+          ctest --test-dir build/runtime --no-tests=error --verbose --timeout 60 --test-output-size-passed 16384 \
+            --output-junit "$RUNNER_TEMP/controller.xml" -R '^(guest_pad_trigger_effects|dualsense_haptics)$'
+          python3 - "$RUNNER_TEMP/controller.xml" <<'PY'
           import sys
           import xml.etree.ElementTree as ET
+          expected = {
+              "guest_pad_trigger_effects": "guest pad trigger effects tests passed",
+              "dualsense_haptics": "dualsense haptics tests passed",
+          }
           cases = ET.parse(sys.argv[1]).findall("testcase")
-          assert len(cases) == 1
-          case = cases[0]
-          assert case.attrib["name"] == "patched_libraries" and case.attrib["status"] == "run"
-          assert all(case.find(tag) is None for tag in ("failure", "error", "skipped"))
-          count = len(list(Path("build/runtime/core/libs/libs").glob("*.prx")))
-          output = case.findtext("system-out", "")
-          assert f"{count} patched libraries loaded, 0 failed" in output, output
-          print(output.strip())
+          assert len(cases) == len(expected) and {c.get("name") for c in cases} == set(expected)
+          for case in cases:
+              assert case.get("status") == "run"
+              assert all(case.find(tag) is None for tag in ("skipped", "error", "failure"))
+              assert expected[case.get("name")] in case.findtext("system-out", "")
           PY
