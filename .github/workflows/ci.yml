@@ -1,12 +1,5 @@
 name: Native probe verification
-on:
-  workflow_dispatch:
-    inputs:
-      hosts:
-        description: Hosted hardware to exercise
-        type: choice
-        default: arm64
-        options: [arm64, macos-intel]
+on: workflow_dispatch
 permissions:
   contents: read
 jobs:
@@ -16,11 +9,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(inputs.hosts == 'macos-intel' && '["macos-26-intel"]' || '["ubuntu-24.04-arm","windows-11-arm","macos-26"]') }}
+        os: [ubuntu-24.04-arm, windows-11-arm, macos-26-intel]
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: d412d89f93400b129d37fdbb75ce218ea75d70bd
+          ref: 54534b77deb7907f20cb0b26e6194bae71a7f2ea
           persist-credentials: false
       - name: Configure Windows ARM64
         if: runner.os == 'Windows'
