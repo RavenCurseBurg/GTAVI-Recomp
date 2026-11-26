@@ -14,7 +14,7 @@
 
 int main() {
     // The test runner gives each invocation an empty temporary directory.
-    const auto path = std::filesystem::absolute("ordinary.txt");
+    const std::filesystem::path path("ordinary.txt");
     const std::string native = path.string();
     std::FILE* stream = std::fopen(native.c_str(), "wb");
     if (!stream) return 1;
@@ -26,7 +26,10 @@ int main() {
     for (const bool use_fd : {false, true}) {
         for (const unsigned short mode : {0640, 0604, 0400, 0600}) {
             const int rc = use_fd ? sceKernelFchmod(fd, mode) : sceKernelChmod_nid_postfix(native.c_str(), mode);
-            if (rc != 0) { std::fprintf(stderr, "chmod failed: %d\n", rc); return 2; }
+            if (rc != 0) {
+                std::fprintf(stderr, "%s mode=%04o failed: %d\n", use_fd ? "fd" : "path", mode, rc);
+                return 2;
+            }
 #ifdef _WIN32
             const DWORD attributes = GetFileAttributesW(path.c_str());
             if (attributes == INVALID_FILE_ATTRIBUTES) return 3;
