@@ -22,15 +22,15 @@ jobs:
       - name: Build pinned clock and barrier fixtures
         run: |
           cmake -S third_party/AnyPS5 -B build/runtime -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 -DBUILD_TESTING=ON
-          cmake --build build/runtime --parallel 4 --target guest_kernel_clock_tests agc_barrier_batch_tests
-      - name: Verify both fixtures ran without skips
+          cmake --build build/runtime --parallel 4 --target guest_kernel_clock_tests guest_freebsd_clocks_tests agc_barrier_batch_tests
+      - name: Verify the clock and barrier fixtures ran without skips
         run: |
-          ctest --test-dir build/runtime --verbose --no-tests=error --output-junit "$RUNNER_TEMP/clock-barriers.xml" -R '^(guest_kernel_clock|agc_barrier_batch)$'
+          ctest --test-dir build/runtime --verbose --no-tests=error --output-junit "$RUNNER_TEMP/clock-barriers.xml" -R '^(guest_kernel_clock|guest_freebsd_clocks|agc_barrier_batch)$'
           python3 - "$RUNNER_TEMP/clock-barriers.xml" <<'PY'
           import sys
           from xml.etree import ElementTree
           cases = ElementTree.parse(sys.argv[1]).findall("testcase")
-          assert len(cases) == 2 and {case.get("name") for case in cases} == {"agc_barrier_batch", "guest_kernel_clock"}
+          assert len(cases) == 3 and {case.get("name") for case in cases} == {"agc_barrier_batch", "guest_kernel_clock", "guest_freebsd_clocks"}
           for case in cases:
               assert case.get("status") == "run" and all(case.find(tag) is None for tag in ("failure", "error", "skipped"))
               print(case.get("name"), case.get("status"), case.get("time"))
