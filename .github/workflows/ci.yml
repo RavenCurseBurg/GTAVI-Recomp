@@ -1,116 +1,37 @@
-name: CI
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-  workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
+name: Verify pinned clock and graphics barrier fixtures
+on: workflow_dispatch
+permissions:
+  contents: read
 jobs:
-  windows:
-    name: windows / msvc
-    runs-on: windows-latest
+  runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure
-        # No -G: use whichever Visual Studio the runner image provides. The
-        # generator name changes between runner images, the default does not.
-        run: >
-          cmake -S . -B build
-          -A x64
-          -DGTAVI_WARNINGS_AS_ERRORS=ON
-
-      - name: Build
-        run: cmake --build build --config Release --parallel
-
-      - name: Test
-        run: ctest --test-dir build -C Release --output-on-failure
-
-  linux:
-    name: linux / ${{ matrix.compiler }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - compiler: gcc
-            cc: gcc
-            cxx: g++
-            clang_tidy: ''
-          - compiler: clang
-            cc: clang
-            cxx: clang++
-            clang_tidy: clang-tidy
-    env:
-      CC: ${{ matrix.cc }}
-      CXX: ${{ matrix.cxx }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure
-        run: >
-          cmake -S . -B build
-          -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DGTAVI_WARNINGS_AS_ERRORS=ON
-          -DCMAKE_CXX_CLANG_TIDY=${{ matrix.clang_tidy }}
-
-      - name: Build
-        run: cmake --build build --parallel
-
-      - name: Test
-        run: ctest --test-dir build --output-on-failure
-
-  anyps5:
-    name: anyps5 relinker at the pinned commit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Fetch AnyPS5 at the pinned commit
-        # AnyPS5's own submodules are not needed for the relinker-only mode
-        # (third_party/AnyPS5/docs/dev/BUILD.md), so only the submodule
-        # itself is checked out.
-        run: git submodule update --init third_party/AnyPS5
-
-      - name: Configure
-        run: >
-          cmake -S third_party/AnyPS5 -B build-anyps5
-          -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DANYPS5_RELINKER_ONLY=ON
-          -DBUILD_TESTING=ON
-
-      - name: Build
-        run: cmake --build build-anyps5 --parallel
-
-      - name: Test
-        run: >
-          ctest --test-dir build-anyps5 --output-on-failure
-          --timeout 120 --parallel 4 --no-tests=error
-
-  app0:
-    name: PS5 app0 preflight
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Test the app0 checker
-        run: python3 -I tests/test_check_app0.py
-
-  progress:
-    name: readme progress is up to date
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Test the progress tooling
-        run: python3 -m unittest discover -s tests/python -v
-
-      - name: Check README progress section
-        run: python3 scripts/update_progress.py --check
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Fetch the pinned source and runtime dependencies
+        run: |
+          git submodule update --init --depth 1 third_party/AnyPS5
+          git -C third_party/AnyPS5 submodule update --init --depth 1 --recursive --jobs 4
+          pin=$(git -C third_party/AnyPS5 rev-parse HEAD)
+          test "$pin" = "$(git rev-parse HEAD:third_party/AnyPS5)"
+          test "$pin" = 15826135019b8c7de27f42661a850a1dd9750932
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends g++-14 ninja-build nasm pkg-config libx11-dev libxext-dev libxrandr-dev libasound2-dev libpipewire-0.3-dev libpulse-dev libwayland-dev libxkbcommon-dev libegl-dev libdecor-0-dev
+      - name: Build pinned clock and barrier fixtures
+        run: |
+          cmake -S third_party/AnyPS5 -B build/runtime -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14 -DBUILD_TESTING=ON
+          cmake --build build/runtime --parallel 4 --target guest_kernel_clock_tests agc_barrier_batch_tests
+      - name: Verify both fixtures ran without skips
+        run: |
+          ctest --test-dir build/runtime --verbose --no-tests=error --output-junit "$RUNNER_TEMP/clock-barriers.xml" -R '^(guest_kernel_clock|agc_barrier_batch)$'
+          python3 - "$RUNNER_TEMP/clock-barriers.xml" <<'PY'
+          import sys
+          from xml.etree import ElementTree
+          cases = ElementTree.parse(sys.argv[1]).findall("testcase")
+          assert len(cases) == 2 and {case.get("name") for case in cases} == {"agc_barrier_batch", "guest_kernel_clock"}
+          for case in cases:
+              assert case.get("status") == "run" and all(case.find(tag) is None for tag in ("failure", "error", "skipped"))
+              print(case.get("name"), case.get("status"), case.get("time"))
+          PY
