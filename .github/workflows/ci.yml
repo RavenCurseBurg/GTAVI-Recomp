@@ -1,4 +1,4 @@
-name: Compare host path translations
+name: Verify default drive construction and progress cache
 on: workflow_dispatch
 permissions:
   contents: read
@@ -24,7 +24,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v7
         with:
-          ref: a5fc3827602f277b5d7fff8fe913908d5312bc0b
+          ref: ee5c85dfefcb47de77d99949417388df8a29c37e
           path: candidate
           persist-credentials: false
       - name: Build and test both revisions
@@ -40,3 +40,30 @@ jobs:
           suffix=""
           if [[ "$RUNNER_OS" == Windows ]]; then suffix=.exe; fi
           python verification/compare_lookup.py "build/baseline/bin/lookup_measure$suffix" "build/candidate/bin/lookup_measure$suffix"
+          python verification/compare_factory.py "build/baseline/bin/factory_measure$suffix" "build/candidate/bin/factory_measure$suffix"
+  progress:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: e819c23efb11168d01984733274807fca9e257e1
+          path: fixed
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          ref: 0b332f88343b0fdebf20a640a5c625a2132a521b
+          path: baseline
+          persist-credentials: false
+      - name: Compare offline Discord command outcomes
+        run: |
+          python3 -m venv "$RUNNER_TEMP/progress-env"
+          py="$RUNNER_TEMP/progress-env/bin/python"
+          "$py" -m pip install -r fixed/bot/requirements.txt
+          cp fixed/bot/test_progress.py baseline/bot/
+          if "$py" -m unittest discover -s baseline/bot -p test_progress.py -v > "$RUNNER_TEMP/before.txt" 2>&1; then
+            echo 'Expected both baseline regression cases to fail'; exit 1
+          fi
+          cat "$RUNNER_TEMP/before.txt"
+          grep -F 'FAILED (errors=2)' "$RUNNER_TEMP/before.txt"
+          "$py" -W error::RuntimeWarning -m unittest discover -s fixed/bot -p test_progress.py -v
