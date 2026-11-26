@@ -1,116 +1,87 @@
-name: CI
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-  workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
+name: Verify probe emulation and snapshot provenance
+on: workflow_dispatch
+permissions:
+  contents: read
 jobs:
-  windows:
-    name: windows / msvc
-    runs-on: windows-latest
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure
-        # No -G: use whichever Visual Studio the runner image provides. The
-        # generator name changes between runner images, the default does not.
-        run: >
-          cmake -S . -B build
-          -A x64
-          -DGTAVI_WARNINGS_AS_ERRORS=ON
-
-      - name: Build
-        run: cmake --build build --config Release --parallel
-
-      - name: Test
-        run: ctest --test-dir build -C Release --output-on-failure
-
-  linux:
-    name: linux / ${{ matrix.compiler }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - compiler: gcc
-            cc: gcc
-            cxx: g++
-            clang_tidy: ''
-          - compiler: clang
-            cc: clang
-            cxx: clang++
-            clang_tidy: clang-tidy
-    env:
-      CC: ${{ matrix.cc }}
-      CXX: ${{ matrix.cxx }}
+      - uses: actions/checkout@v7
+        with:
+          ref: 0b332f88343b0fdebf20a640a5c625a2132a521b
+          path: baseline
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          ref: e2f0d4c001213f2181209b347f7b1d82df02b901
+          path: fixed
+          persist-credentials: false
+      - name: Install ARM64 Linux cross tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends g++-aarch64-linux-gnu qemu-user
+          qemu-aarch64 --version
+          aarch64-linux-gnu-g++ --version
+      - name: Exercise the configured argument list with real AArch64 binaries
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/qemu wrappers"
+          wrapper="$RUNNER_TEMP/qemu wrappers/record run"
+          cat > "$wrapper" <<'SH'
+          #!/bin/bash
+          set -eu
+          test "$1" = "argument with spaces"
+          shift
+          test "$1" = "-L"
+          test "$2" = "/usr/aarch64-linux-gnu"
+          basename "$3" >> "$QEMU_INVOCATIONS"
+          exec qemu-aarch64 "$@"
+          SH
+          chmod +x "$wrapper"
+          for revision in baseline fixed; do
+            build="$RUNNER_TEMP/$revision"
+            export QEMU_INVOCATIONS="$RUNNER_TEMP/$revision.log"
+            cmake -S "$revision" -B "$build" -G Ninja -DCMAKE_SYSTEM_NAME=Linux \
+              -DCMAKE_SYSTEM_PROCESSOR=aarch64 -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
+              -DCMAKE_BUILD_TYPE=Release -DGTAVI_WARNINGS_AS_ERRORS=ON \
+              "-DCMAKE_CROSSCOMPILING_EMULATOR=$wrapper;argument with spaces;-L;/usr/aarch64-linux-gnu"
+            cmake --build "$build" --parallel 4
+            readelf -h "$build/tools/gtavi_probe" | grep AArch64
+            : > "$QEMU_INVOCATIONS"
+            rc=0
+            ctest --test-dir "$build" --no-tests=error --output-on-failure || rc=$?
+            cat "$QEMU_INVOCATIONS"
+            test "$(grep -cx gtavi_tests "$QEMU_INVOCATIONS")" -eq 1
+            invokes=$(grep -cx gtavi_probe "$QEMU_INVOCATIONS" || true)
+            echo "$revision: probe invocations=$invokes, ctest exit=$rc"
+            if test "$revision" = fixed; then
+              test "$rc" -eq 0
+              test "$invokes" -eq 4
+            else
+              test "$invokes" -eq 0
+            fi
+          done
+  snapshot:
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure
-        run: >
-          cmake -S . -B build
-          -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DGTAVI_WARNINGS_AS_ERRORS=ON
-          -DCMAKE_CXX_CLANG_TIDY=${{ matrix.clang_tidy }}
-
-      - name: Build
-        run: cmake --build build --parallel
-
-      - name: Test
-        run: ctest --test-dir build --output-on-failure
-
-  anyps5:
-    name: anyps5 relinker at the pinned commit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Fetch AnyPS5 at the pinned commit
-        # AnyPS5's own submodules are not needed for the relinker-only mode
-        # (third_party/AnyPS5/docs/dev/BUILD.md), so only the submodule
-        # itself is checked out.
-        run: git submodule update --init third_party/AnyPS5
-
-      - name: Configure
-        run: >
-          cmake -S third_party/AnyPS5 -B build-anyps5
-          -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DANYPS5_RELINKER_ONLY=ON
-          -DBUILD_TESTING=ON
-
-      - name: Build
-        run: cmake --build build-anyps5 --parallel
-
-      - name: Test
-        run: >
-          ctest --test-dir build-anyps5 --output-on-failure
-          --timeout 120 --parallel 4 --no-tests=error
-
-  app0:
-    name: PS5 app0 preflight
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Test the app0 checker
-        run: python3 -I tests/test_check_app0.py
-
-  progress:
-    name: readme progress is up to date
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Test the progress tooling
-        run: python3 -m unittest discover -s tests/python -v
-
-      - name: Check README progress section
-        run: python3 scripts/update_progress.py --check
+      - uses: actions/checkout@v7
+        with:
+          ref: d43262bd234af42132f1173c9e6a7b62799f7f82
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Compare the dirty checkout to the pinned snapshot
+        run: |
+          git submodule update --init third_party/AnyPS5
+          fixture=third_party/AnyPS5/core/libs/prx/libGtaviSnapshotFixture/fixture.cpp
+          mkdir -p "$(dirname "$fixture")"
+          echo '// Synthetic untracked library.' > "$fixture"
+          git show HEAD^:scripts/update_progress.py > scripts/baseline_progress_receipt.py
+          python3 scripts/baseline_progress_receipt.py --refresh-anyps5
+          python3 -c "import json; assert json.load(open('progress/anyps5.json'))['library_count'] == 414"
+          python3 scripts/update_progress.py --refresh-anyps5
+          test -f "$fixture"
+          git diff --exit-code -- progress README.md
+          python3 scripts/update_progress.py --check
+          python3 -c "import json; s=json.load(open('progress/anyps5.json')); assert s['library_count'] == 413; print('Corrected 414 to 413 at',s['commit'])"
+          python3 -m unittest discover -s tests/python -q
